@@ -5,7 +5,11 @@
 # The login screen and boot splash are separate -- see the rollback blocks
 # printed by install/50-login-screen.sh and install/60-boot-animation.sh.
 set -euo pipefail
+# Not sourced -- sourcing lib.sh derives REPO from ${BASH_SOURCE[0]}, which
+# under `source` is this script rather than lib.sh, so REPO came out as the
+# uninstall directory.
 source "$(dirname "${BASH_SOURCE[0]}")/../install/lib.sh"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 BK="$HOME/.nothing-rice-backups"
 F=plasma-org.kde.plasma.desktop-appletsrc

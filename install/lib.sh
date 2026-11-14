@@ -41,10 +41,48 @@ extract_to() {
     esac
 }
 
+# Which distro's package manager and boot stack to target. Kubuntu was the
+# original; Arch needs a different apt/grub/initramfs path in nearly every
+# root step, so it is detected once here rather than sniffed in each script.
+#   DISTRO=arch|debian   (override with DISTRO=... if detection ever guesses wrong)
+#   PKG=pacman|apt
+distro_detect() {
+    if [ -z "${DISTRO:-}" ]; then
+        local id=""
+        [ -r /etc/os-release ] && id=$(. /etc/os-release && echo "${ID:-}")
+        case "$id" in
+            arch|archarm|endeavouros|cachyos|garuda|manjaro) DISTRO=arch ;;
+            ubuntu|kubuntu|neon|debian|linuxmint|pop)         DISTRO=debian ;;
+            *) die "unsupported distro '${id:-unknown}' -- set DISTRO=arch or DISTRO=debian" ;;
+        esac
+    fi
+    case "$DISTRO" in
+        arch)   PKG=pacman ;;
+        debian) PKG=apt ;;
+        *)      die "DISTRO must be arch or debian, not '$DISTRO'" ;;
+    esac
+    # An AUR helper is only ever asked for; never fatal if absent.
+    if [ "$PKG" = pacman ]; then
+        AUR_HELPER=""
+        local h
+        for h in paru yay; do have "$h" && { AUR_HELPER=$h; break; }; done
+    fi
+    export DISTRO PKG AUR_HELPER="${AUR_HELPER:-}"
+}
+distro_detect
+
 # Plasma 6 renamed every one of these. Fail early and clearly rather than
 # half-applying the rice on a Plasma 5 box.
 require_plasma6() {
     for c in kwriteconfig6 kreadconfig6 kpackagetool6 qdbus6 plasmashell; do
-        have "$c" || die "$c not found -- this rice targets Plasma 6 (Kubuntu 24.04+)."
+        have "$c" || die "$c not found -- this rice targets Plasma 6 (Kubuntu 24.04+ or Arch)."
     done
+    # Arch splits plasma-workspace into several packages, so this helper can be
+    # missing even with a working shell, and the appearance step then silently
+    # applies nothing. On Ubuntu it arrives with plasma-workspace.
+    if [ "$PKG" = pacman ]; then
+        have plasma-apply-lookandfeel \
+            || die "plasma-apply-lookandfeel not found -- sudo pacman -S plasma-workspace"
+    fi
+    return 0
 }

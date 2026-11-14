@@ -14,11 +14,23 @@ say "Fonts, system-wide"
 # A theme that references NType 82 from ~/.local renders in a fallback face.
 if [ -d "$USERHOME/.local/share/fonts/nothing" ]; then
     install -d /usr/local/share/fonts/nothing
-    cp "$USERHOME"/.local/share/fonts/nothing/*.otf \
+    # The source faces are listed first: --no-dereference would copy a symlink
+    # as a symlink, and a dangling one in the system font directory is worse
+    # than no font at all.
+    cp --no-dereference "$USERHOME"/.local/share/fonts/nothing/*.otf \
        "$USERHOME"/.local/share/fonts/nothing/*.ttf /usr/local/share/fonts/nothing/ 2>/dev/null || true
     chmod 644 /usr/local/share/fonts/nothing/*
-    fc-cache -f >/dev/null
+    fc-cache -f /usr/local/share/fonts >/dev/null
     step "$(ls /usr/local/share/fonts/nothing | wc -l) faces in /usr/local/share/fonts/nothing"
+    # The login screen asks for the family "NType 82 Mono" by name, which the
+    # widget pack does not necessarily ship under that name (it is often just
+    # "NType 82" with a Bold). When the exact family is missing the monospace
+    # labels fall back to whatever the system picks -- point it out instead of
+    # letting the user hunt for it at the greeter.
+    if have fc-list && ! fc-list : family 2>/dev/null | grep -q 'NType 82 Mono'; then
+        warn "no installed font advertises the family 'NType 82 Mono':"
+        warn "  the greeter's monospace labels will render in a system face."
+    fi
 else
     warn "no Nothing fonts found -- run step 2 first"
 fi
@@ -46,22 +58,49 @@ chmod -R a+rX "$DEST"
 say "Validating the QML before it can lock you out"
 # An unknown property anywhere in the theme makes SDDM silently swap in the
 # stock greeter -- the theme just "doesn't apply" with no visible error.
+# Kubuntu's qt6 tools live under /usr/lib/qt6/bin; Arch puts them in /usr/bin.
 QMLLINT=$(ls /usr/lib/qt6/bin/qmllint 2>/dev/null || command -v qmllint 2>/dev/null || true)
+if [ -z "$QMLLINT" ] && [ "$PKG" = pacman ]; then
+    sudo pacman -S --needed --noconfirm qt6-declarative 2>/dev/null || true
+    QMLLINT=$(ls /usr/lib/qt6/bin/qmllint 2>/dev/null || command -v qmllint 2>/dev/null || true)
+fi
+# The qmllint below runs as the invoking user (sudo -E keeps the umask and
+# PATH, not the privilege). Re-assert the read bits so a restrictive umask on
+# this machine cannot make the linter's EACCES read as a theme problem.
+chmod -R a+rX "$DEST"
 if [ -n "$QMLLINT" ]; then
     bad=0
     for f in "$DEST"/*.qml; do
-        if "$QMLLINT" "$f" 2>&1 | grep -q '^Error'; then
+        out=$("$QMLLINT" "$f" 2>&1)
+        rc=$?
+        if [ "$rc" -ne 0 ] || grep -q '^Error' <<<"$out"; then
             warn "QML error in $(basename "$f")"; bad=1
         fi
     done
     [ "$bad" -eq 0 ] && step "no QML errors" || die "fix the theme before activating it"
 else
-    warn "qmllint not available -- skipping validation"
+    warn "qmllint not found (Arch: sudo pacman -S qt6-declarative) -- skipping validation"
 fi
 
 say "Checking the sddm user can resolve the fonts"
+# fc-match runs as the greeter user from the greeter's own home directory:
+# on Arch that is /var/lib/sddm, mode 0750, so a plain `sudo -u sddm fc-match`
+# fails with EPERM on the working directory and says nothing about the fonts.
+FCM_DIR=""
+for d in '$HOME' /tmp; do     # literal: expanded by the sh -c below, by that user
+    if sudo -u sddm sh -c "cd $d && exec fc-match --version" >/dev/null 2>&1; then
+        FCM_DIR=$d; break
+    fi
+done
+[ -n "$FCM_DIR" ] || warn "cannot run fc-match as the sddm user -- skipping"
 for f in "NType 82" "NType 82 Mono" "Nothing Font (5x7)"; do
-    got=$(sudo -u sddm fc-match "$f" 2>/dev/null || echo FAILED)
+    [ -n "$FCM_DIR" ] || break
+    got=$(sudo -u sddm sh -c "cd $FCM_DIR && exec fc-match --format='%{file}\n' \"\$1\"" _ "$f" 2>/dev/null)
+    if [ -z "$got" ]; then
+        got="(could not check)"
+    elif ! grep -qiE 'ntype|nothing' <<<"$got"; then
+        got="$got  <-- not a Nothing face"
+    fi
     printf '    %-22s -> %s\n' "$f" "$got"
 done
 
