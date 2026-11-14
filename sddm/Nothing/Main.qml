@@ -70,7 +70,7 @@ Item {
         anchors.fill: parent
 
         property bool uiVisible: true
-        property bool blockUI: mainStack.depth > 1 || userListComponent.mainPasswordBox.text.length > 0 || Keyboards.KWinVirtualKeyboard.active || config.type !== "image"
+        property bool blockUI: mainStack.depth > 1 || userListComponent.mainPasswordBox.text.length > 0 || Keyboards.KWinVirtualKeyboard.visible || config.type !== "image"
 
         hoverEnabled: true
         drag.filterChildren: true
@@ -200,7 +200,7 @@ Item {
                     return parts.join(" • ");
                 }
 
-                actionItemsVisible: !Keyboards.KWinVirtualKeyboard.active
+                actionItemsVisible: !Keyboards.KWinVirtualKeyboard.visible
                 actionItems: [
                     ActionButton {
                         icon.name: "system-hibernate"
@@ -334,7 +334,7 @@ Item {
                     sddm.login(username, password, sessionButton.currentIndex)
                 }
 
-                actionItemsVisible: !Keyboards.KWinVirtualKeyboard.active
+                actionItemsVisible: !Keyboards.KWinVirtualKeyboard.visible
                 actionItems: [
                     ActionButton {
                         icon.name: "system-suspend"
@@ -442,9 +442,9 @@ Item {
                         Keyboards.KWinVirtualKeyboard.forceActivate();
                     }
                 }
-                // No `enabled`/`status` on the 6.8 singleton -- `visible` is the
-                // only thing that says whether KWin gave us a virtual keyboard.
-                visible: Keyboards.KWinVirtualKeyboard.visible !== undefined
+                // Always shown: the singleton exposes no `enabled`/`status`, and
+                // pressing it when no virtual keyboard exists is harmless.
+                visible: true
 
                 Layout.fillHeight: true
                 containmentMask: Item {
