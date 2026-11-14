@@ -37,12 +37,23 @@ install_ocs() {
     local id="$1" kind="$2" label="$3" f
     f=$(ocs_download "$id" "$TMP") || { warn "skipped $label (id $id)"; return 0; }
     case "$kind" in
-        lookandfeel) kpackagetool6 --type Plasma/LookAndFeel --install "$f" >/dev/null 2>&1 \
-                     || kpackagetool6 --type Plasma/LookAndFeel --upgrade "$f" >/dev/null 2>&1 || true ;;
-        plasmatheme) kpackagetool6 --type Plasma/Theme --install "$f" >/dev/null 2>&1 \
-                     || kpackagetool6 --type Plasma/Theme --upgrade "$f" >/dev/null 2>&1 || true ;;
-        applet)      kpackagetool6 --type Plasma/Applet --install "$f" >/dev/null 2>&1 \
-                     || kpackagetool6 --type Plasma/Applet --upgrade "$f" >/dev/null 2>&1 || true ;;
+        lookandfeel|plasmatheme|applet)
+            # --upgrade only works on an already-installed package; --install on
+            # a fresh box. Both are tried, and a package that lands in neither
+            # way is reported instead of being announced as done -- step 30's
+            # `plasma-apply-lookandfeel -a Nothing` then fails with "Unable to
+            # find the theme named Nothing" and the whole rice is unthemed.
+            local t
+            case "$kind" in
+                lookandfeel) t=Plasma/LookAndFeel ;;
+                plasmatheme) t=Plasma/Theme ;;
+                applet)      t=Plasma/Applet ;;
+            esac
+            local out
+            out=$(kpackagetool6 --type "$t" --install "$f" 2>&1) \
+                || out=$(kpackagetool6 --type "$t" --upgrade "$f" 2>&1) \
+                || { warn "$label did not install:"; printf '%s\n' "$out" | tail -3 | sed 's/^/      /'
+                     return 0; } ;;
         aurorae)     extract_to "$f" "$LOCAL/aurorae/themes" ;;
         colors)      extract_to "$f" "$TMP/colors"
                      mkdir -p "$LOCAL/color-schemes"
@@ -67,7 +78,7 @@ install_ocs 2130967 applet      "Panel Colorizer (luisbocanegra)"
 
 say "Overview widget (himdek)"
 if git clone --depth 1 https://github.com/HimDek/Plasma-Overview-Widget "$TMP/ov" >/dev/null 2>&1; then
-    d=$(find "$TMP/ov" -name metadata.json -printf '%h\n' | head -1)
+    d=$(find "$TMP/ov" -name metadata.json -printf '%h\n' | head -1 || true)
     [ -n "$d" ] && { kpackagetool6 --type Plasma/Applet --install "$d" >/dev/null 2>&1 \
                   || kpackagetool6 --type Plasma/Applet --upgrade "$d" >/dev/null 2>&1 || true; }
     step "installed"
