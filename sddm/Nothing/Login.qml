@@ -3,6 +3,7 @@ import org.kde.breeze.components
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
+import Qt5Compat.GraphicalEffects
 
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.extras as PlasmaExtras
@@ -73,6 +74,73 @@ SessionManagementScreen {
         // See https://bugreports.qt.io/browse/QTBUG-55460
         loginButton.forceActiveFocus();
         loginRequest(username, password);
+    }
+
+    // Nothing's design has no avatar grid, but a single circular face above the
+    // prompt is the same monochrome language -- one fixed-size silhouette rather
+    // than the multicolour user list the theme deliberately avoids. The image is
+    // /usr/share/sddm/themes/<theme>/faces/.face.icon, staged by the installer;
+    // if it is missing the circle shows a plain outline instead of breaking.
+    Item {
+        id: faceRow
+        visible: showUsernamePrompt
+        Layout.alignment: Qt.AlignHCenter
+        Layout.topMargin: Kirigami.Units.gridUnit
+        implicitWidth: faceSize
+        implicitHeight: faceSize
+
+        readonly property int faceSize: Kirigami.Units.gridUnit * 3
+
+        Image {
+            id: faceImage
+            anchors.fill: parent
+            anchors.margins: 2
+            source: "faces/.face.icon"
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            sourceSize.width: faceSize * Screen.devicePixelRatio
+            sourceSize.height: faceSize * Screen.devicePixelRatio
+            // Hidden once masked, so it is not also drawn square on top.
+            visible: false
+        }
+
+        // Qt has no built-in circular clip for an Image; an OpacityMask with a
+        // rounded Rectangle as the mask is the standard way.
+        OpacityMask {
+            anchors.fill: faceImage
+            source: faceImage
+            maskSource: mask
+        }
+
+        Rectangle {
+            id: mask
+            anchors.fill: faceImage
+            radius: width / 2
+            color: "#ffffff"
+            layer.enabled: false
+            visible: false
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            color: "transparent"
+            border.width: 1
+            border.color: "#333333"
+        }
+
+        Rectangle {
+            // When there is no image, a small monochrome mark stands in -- the
+            // dotted "person" of the Nothing icon set, drawn with three dots.
+            anchors.centerIn: parent
+            width: parent.faceSize * 0.42
+            height: parent.faceSize * 0.42
+            radius: width / 2
+            color: "transparent"
+            border.width: 1
+            border.color: "#666666"
+            visible: faceImage.status !== Image.Ready
+        }
     }
 
     PlasmaComponents3.TextField {
