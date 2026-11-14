@@ -12,6 +12,7 @@ import Qt5Compat.GraphicalEffects
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.private.keyboardindicator as KeyboardIndicator
 import org.kde.kirigami as Kirigami
+import org.kde.plasma.workspace.keyboardlayout as Keyboards
 
 import org.kde.breeze.components
 
@@ -307,17 +308,6 @@ Item {
             }
         }
 
-        VirtualKeyboardLoader {
-            id: inputPanel
-
-            z: 1
-
-            screenRoot: root
-            mainStack: mainStack
-            mainBlock: userListComponent
-            passwordField: userListComponent.mainPasswordBox
-        }
-
         Component {
             id: userPromptComponent
             Login {
@@ -441,14 +431,20 @@ Item {
                 id: virtualKeyboardButton
 
                 text: i18ndc("plasma-desktop-sddm-theme", "Button to show/hide virtual keyboard", "Virtual Keyboard").replace("&", "").toUpperCase()
-                icon.name: inputPanel.keyboardActive ? "input-keyboard-virtual-on" : "input-keyboard-virtual-off"
+                icon.name: Keyboards.KWinVirtualKeyboard.visible ? "input-keyboard-virtual-on" : "input-keyboard-virtual-off"
                 onClicked: {
-                    // Otherwise the password field loses focus and virtual keyboard
-                    // keystrokes get eaten
-                    userListComponent.mainPasswordBox.forceActiveFocus();
-                    inputPanel.showHide()
+                    if (Keyboards.KWinVirtualKeyboard.visible) {
+                        Keyboards.KWinVirtualKeyboard.active = false;
+                    } else {
+                        // Otherwise the password field loses focus and on-screen
+                        // keyboard keystrokes get eaten
+                        userListComponent.mainPasswordBox.forceActiveFocus();
+                        Keyboards.KWinVirtualKeyboard.forceActivate();
+                    }
                 }
-                visible: inputPanel.status === Loader.Ready
+                // No `enabled`/`status` on the 6.8 singleton -- `visible` is the
+                // only thing that says whether KWin gave us a virtual keyboard.
+                visible: Keyboards.KWinVirtualKeyboard.visible !== undefined
 
                 Layout.fillHeight: true
                 containmentMask: Item {
