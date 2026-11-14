@@ -70,7 +70,7 @@ Item {
         anchors.fill: parent
 
         property bool uiVisible: true
-        property bool blockUI: mainStack.depth > 1 || userListComponent.mainPasswordBox.text.length > 0 || inputPanel.keyboardActive || config.type !== "image"
+        property bool blockUI: mainStack.depth > 1 || userListComponent.mainPasswordBox.text.length > 0 || Keyboards.KWinVirtualKeyboard.active || config.type !== "image"
 
         hoverEnabled: true
         drag.filterChildren: true
@@ -200,7 +200,7 @@ Item {
                     return parts.join(" • ");
                 }
 
-                actionItemsVisible: !inputPanel.keyboardActive
+                actionItemsVisible: !Keyboards.KWinVirtualKeyboard.active
                 actionItems: [
                     ActionButton {
                         icon.name: "system-hibernate"
@@ -334,7 +334,7 @@ Item {
                     sddm.login(username, password, sessionButton.currentIndex)
                 }
 
-                actionItemsVisible: !inputPanel.keyboardActive
+                actionItemsVisible: !Keyboards.KWinVirtualKeyboard.active
                 actionItems: [
                     ActionButton {
                         icon.name: "system-suspend"
