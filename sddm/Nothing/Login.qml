@@ -77,46 +77,48 @@ SessionManagementScreen {
 
     // Nothing's design has no avatar grid, but a single circular face above the
     // prompt is the same monochrome language -- one fixed-size silhouette rather
-    // than the multicolour user list the theme deliberately avoids. The image is
-    // /usr/share/sddm/themes/<theme>/faces/.face.icon, staged by the installer;
-    // if it is missing the circle shows a plain outline instead of breaking.
+    // than the multicolour user list the theme deliberately avoids.
+    //
+    // It contributes ZERO height to the login column on purpose. Main.qml sizes
+    // mainStack to root.height + 3 gridUnits and leaves it top-aligned, so the
+    // bottom of the column sits just off the screen edge; anything that grows
+    // the column pushes the power buttons out of view entirely. The avatar is
+    // therefore anchored above the username field and overflows upward.
     Item {
         id: faceRow
         visible: showUsernamePrompt
-        Layout.alignment: Qt.AlignHCenter
-        // No topMargin: Main.qml sizes mainStack to root.height + 3 gridUnits and
-        // centres it, so anything that makes the login column taller pushes the
-        // power buttons off the bottom of the screen. The avatar is kept small
-        // for the same reason -- it has to fit inside the existing budget.
-        Layout.preferredWidth: faceRow.faceSize
-        Layout.preferredHeight: faceRow.faceSize
-        implicitWidth: faceRow.faceSize
-        implicitHeight: faceRow.faceSize
+        Layout.fillWidth: true
+        Layout.preferredHeight: 0
+        Layout.maximumHeight: 0
+        implicitHeight: 0
 
         readonly property int faceSize: Kirigami.Units.gridUnit * 2
 
         // The circular crop is baked into the PNG by install/50-login-screen.sh,
-        // so this is a plain Image: no OpacityMask, no Qt5Compat.GraphicalEffects,
-        // nothing that can fail to parse.
+        // so this is a plain Image -- no OpacityMask, no effect module.
         Image {
             id: faceImage
-            anchors.fill: parent
-            anchors.margins: 2
+            // Bottom edge sits just above the username rule; the image grows up
+            // from there into the space between the clock and the prompt.
+            anchors.bottom: parent.top
+            anchors.bottomMargin: Kirigami.Units.smallSpacing
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: faceRow.faceSize
+            height: faceRow.faceSize
             source: "faces/.face.icon"
             fillMode: Image.PreserveAspectFit
             asynchronous: true
             smooth: true
-            // Qualify with the id: an unqualified name here resolves against
-            // the component root, not the parent Item, and fails with
-            // "ReferenceError: faceSize is not defined".
+            // Qualify with the id: an unqualified name resolves against the
+            // component root, not the parent Item ("faceSize is not defined").
             sourceSize.width: faceRow.faceSize * Screen.devicePixelRatio
             sourceSize.height: faceRow.faceSize * Screen.devicePixelRatio
         }
 
-        // Only when there is no image at all: a thin ring, so the layout does not
-        // collapse and nothing looks broken.
+        // Only when there is no image at all: a thin ring, so the prompt does not
+        // look broken.
         Rectangle {
-            anchors.fill: parent
+            anchors.fill: faceImage
             radius: width / 2
             color: "transparent"
             border.width: 1
