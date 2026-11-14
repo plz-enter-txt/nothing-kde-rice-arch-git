@@ -21,11 +21,13 @@ Any hit means the theme was rejected. Validate the installed copy — not your
 working copy — before rebooting:
 
 ```bash
-for f in /usr/share/sddm/themes/Nothing/*.qml; do /usr/lib/qt6/bin/qmllint "$f"; done
+for f in /usr/share/sddm/themes/Nothing/*.qml; do qmllint "$f"; done
 ```
 
-`install/50-login-screen.sh` runs this automatically and refuses to activate a
-theme that fails.
+(`qmllint` is at `/usr/lib/qt6/bin/qmllint` on Kubuntu and `/usr/bin/qmllint` on
+Arch; both are in `$PATH` or one `ls` away. On Arch it comes from
+`qt6-declarative`.) `install/50-login-screen.sh` runs this automatically and
+refuses to activate a theme that fails.
 
 ### The login screen renders in the wrong font
 
@@ -34,10 +36,14 @@ Fonts in `~/.local/share/fonts` are invisible to it. They must be in
 `/usr/local/share/fonts`. Verify as the sddm user itself:
 
 ```bash
-sudo -u sddm fc-match "NType 82 Mono"
+sudo -u sddm sh -c 'cd "$HOME" && exec fc-match "NType 82 Mono"'
 ```
 
 If that returns DejaVu or similar, the fonts are not installed system-wide.
+
+The `cd` matters on Arch: the sddm account's home is `/var/lib/sddm`, mode 0750,
+and `sudo -u sddm fc-match` from your own directory dies with `EPERM` on getcwd —
+which looks like a font problem and is not. `50-login-screen.sh` handles this.
 
 ### Locked out by a broken theme
 
@@ -66,16 +72,61 @@ so shutdown shows the other one.
 
 Fix: name the theme explicitly in both places. `install/60-boot-animation.sh` does.
 
+On Arch there is no `update-alternatives` in this chain at all: the `plymouth`
+mkinitcpio hook bakes in whatever theme `plymouthd.conf` names, so the two ends
+cannot disagree. The Arch equivalent to check is that the hook is present —
+`grep HOOKS /etc/mkinitcpio.conf` / `/etc/mkinitcpio.conf.d/*.conf` — and that the
+frames are in the image: `lsinitcpio /boot/initramfs-linux.img | grep themes/nothing`.
+
+### After the splash is installed the screen is blank for a long time on boot (Arch)
+
+Arch's `plymouth-start.service` starts the splash from userspace, and Ubuntu's
+`no_console_handoff=1` patch (which makes the splash draw before userspace) is not
+in it. With `quiet` on the kernel command line there is nothing on screen until
+init. `60-boot-animation.sh` drops `quiet` for this reason; if the blank gap is
+back, check the kernel command line:
+
+```bash
+cat /proc/cmdline                                    # is 'quiet' still there?
+cat /etc/default/grub.d/99-nothing-splash.cfg        # the drop-in the script writes
+```
+
+and make sure whatever regenerates the boot config actually reads that file —
+`grub-mkconfig` does; a systemd-boot UKI cmdline in `/etc/kernel/cmdline` or a
+hand-written entry does not.
+
 ### The machine hangs at the GRUB menu after a reboot
 
-`update-grub` races `grub2-common.service` and can leave `recordfail=1` in the
-GRUB environment. The next boot then waits at the menu forever. Always check
-before rebooting:
+This is the Kubuntu `update-grub`. `update-grub` races `grub2-common.service` and
+can leave `recordfail=1` in the GRUB environment. The next boot then waits at the
+menu forever. Arch has no `update-grub` and nothing here writes `/boot/grub/grubenv`,
+so it does not apply there. Always check before rebooting:
 
 ```bash
 grub-editenv /boot/grub/grubenv list | grep recordfail && \
   sudo grub-editenv /boot/grub/grubenv unset recordfail
 ```
+
+### `mkinitcpio` fails during a pacman transaction: "Invalid option -k -- '/boot/vmlinuz-…' must be readable" (Arch)
+
+`/boot` is a separate vfat partition (it usually holds the EFI System Partition),
+it is in `/etc/fstab`, and it was not mounted when the package transaction ran its
+`linux` hook. Every preset then fails with that message and **no new initramfs is
+written** — pacman still reports the transaction as finished, so it is easy to miss.
+
+This bites right after `10-packages`, because installing `plymouth` triggers
+"Updating linux initcpios". Fix:
+
+```bash
+findmnt /boot                      # empty? then it was not mounted
+sudo mount /boot
+sudo mkinitcpio -P                 # now the hooks and the plymouth theme get baked in
+```
+
+A preset also fails this way for a kernel you do not actually have installed —
+harmless, provided at least one real image was written. `60-boot-animation.sh`
+checks every `/boot/initramfs-*.img` rather than just the newest, and says which
+ones lack the theme.
 
 ### The animation stutters
 
@@ -189,6 +240,8 @@ Snap launchers hardcode an absolute PNG path
 (`/snap/firefox/current/default256.png`), which bypasses the icon theme entirely.
 A local override in `~/.local/share/applications/` with a plain `Icon=firefox`
 lets the theme's monochrome version win. `install/30-components.sh` writes these.
+Arch does not ship snapd, so this step is a no-op there — pacman's own launchers
+use plain icon names already.
 
 ### Dolphin's Information panel keeps coming back
 
@@ -298,6 +351,22 @@ Most often it is group membership — reading the touchpad needs `input`:
 ```bash
 id -nG | grep -q input || sudo gpasswd -a "$USER" input   # then log out and back in
 ```
+
+On Arch the next most common cause is that `libinput` is installed but
+`libinput-tools` is not. They are two packages: `libinput` is the library, and
+`libinput-tools` has `list-devices` and `debug-events`, which the watcher shells
+out to. Both calls discard their stderr, so a missing tool looks exactly like a
+missing touchpad:
+
+```bash
+command -v libinput || sudo pacman -S libinput-tools
+```
+
+A third, subtler one is exclusive device access: while `libinput debug-events` reads
+the touchpad, KWin's own libinput context cannot open it, so **KWin's native
+three-finger gestures (including this rice's left/right desktop switching) stop
+working for as long as the watcher is running**. If the arrow gestures matter to
+you, set `ENABLED=0` in `~/.config/nothing-gestures.conf`.
 
 ### Swipes register but nothing happens on screen
 

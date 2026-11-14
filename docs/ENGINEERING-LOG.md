@@ -765,3 +765,104 @@ an error.
 Two pre-existing CPU sinks found and left alone, both third-party: a
 `font.pixelSize` **binding loop** in jaxparrow07's digitalclocklarge
 (`main.qml:116`) and a recursive Layout rearrange in its weather widget.
+
+---
+
+## Arch port
+
+The rice was built and driven on Kubuntu, where nearly everything was reached
+through Debian tooling that Arch does not have. Distro detection lives in
+`install/lib.sh` (`DISTRO` = `arch` | `debian`, `PKG` = `pacman` | `apt`, plus
+whatever AUR helper happens to exist) so no root step has to sniff the distro
+twice.
+
+What had to change, and why:
+
+- **Packages.** The two lists are kept whole rather than translated:
+  `fonts-noto-color-emoji` → `noto-fonts-emoji`, `python3-pil` → `python-pillow`,
+  `plymouth-themes` → nothing (Plymouth ships its themes), plus `plymouth-kcm` for
+  the Boot Splash settings page and `breeze-plymouth` as the rollback theme.
+- **`libinput-tools`, not `libinput`.** On Arch the package named `libinput`
+  contains the shared library and nothing else; `libinput list-devices` and
+  `libinput debug-events` — which is how `nothing-gestures` finds the touchpad and
+  reads the swipe — live in the separate `libinput-tools`. Nothing in a normal
+  Plasma install pulls that in, so the gestures would have died with "no
+  gesture-capable touchpad found" (or, because both calls are `2>/dev/null`'d,
+  with the watcher restarting every 5 s and saying nothing useful). Verified with
+  `pacman -Si libinput`: optional dep `libinput-tools: debug utilities`.
+- **`imagemagick`'s ghostscript optdep** would drag in all of texlive on Arch.
+  `--assume-installed ghostscript` keeps it out; `-extent` needs none of it.
+- **`plasma-changeicons`.** Debian: `/usr/lib/<triplet>/libexec/plasma-changeicons`.
+  Arch: `/usr/lib/plasma-changeicons`. Both are tried.
+- **SDDM fonts.** `/var/lib/sddm` is 0750, so `sudo -u sddm fc-match` from your own
+  directory dies on getcwd with `EPERM` before fontconfig even runs. The check now
+  `cd`s to the greeter's home (or /tmp) first.
+- **`qmllint`.** Arch has it in `/usr/bin`; Kubuntu in `/usr/lib/qt6/bin`. Both are
+  searched, and `50-login-screen.sh` `chmod`s the staged theme readable before
+  linting it, since a restrictive umask can otherwise make EACCES look like a theme
+  error.
+- **Plymouth.** No `update-alternatives`, no `update-initramfs`, no
+  `plymouth-set-default-theme` in the Debian sense. Arch's `plymouth-set-default-theme
+  -R` writes `/etc/plymouth/plymouthd.conf` *and* runs `mkinitcpio -P`; the theme
+  only reaches the initramfs through the `plymouth` hook. mkinitcpio 42 supports
+  drop-ins that *replace* a variable, so the hook is added by writing
+  `/etc/mkinitcpio.conf.d/nothing-plymouth.conf` with the full `HOOKS=` array rather
+  than by regex-editing `/etc/mkinitcpio.conf` — 42 also moved its config variables
+  into drop-ins, so the old in-place sed is both fragile and contrary to the tool's
+  own direction. Older mkinitcpio (no `conf.d`, not mentioned in its man page) gets
+  the in-place edit plus a timestamped backup.
+- **Boot console hand-over.** Ubuntu's initramfs-tools Plymouth hook is built with
+  `no_console_handoff=1`; Arch's `plymouth-start.service` starts the splash from
+  userspace. With `quiet` the screen is blank until then. The script drops `quiet`
+  (leaving `loglevel=3`) via `/etc/default/grub.d/99-nothing-splash.cfg`, which
+  `grub-mkconfig` sources after `/etc/default/grub`, and regenerates `grub.cfg`.
+  `GRUB_PARAMS=quiet` opts out. systemd-boot users get a warning instead.
+- **GRUB `recordfail`.** That is the Kubuntu `update-grub`/`grub2-common.service`
+  race. Arch never runs `update-grub` here, so the check is only done when
+  `grub-editenv` exists.
+- **Klassy.** AUR (`paru -S klassy`), only ever suggested, never installed.
+- **`set -e` and unmatched globs.** `CHANGEICONS=$(ls /usr/lib/*/libexec/plasma-changeicons /usr/lib/plasma-changeicons | head -1)`
+  ended the whole appearance step with exit 2, because one of the two paths does
+  not exist on either distro, the unmatched glob is passed through literally, and
+  `ls` exits 2. Piping into `head` does not save it. Same trap in the snap-icon
+  loop (`/var/lib/snapd/...` without snapd) and in two `grep | head -1` reads.
+  All now end in `|| true`.
+- **A silently swallowed `kpackagetool6` failure.** `install_ocs` did
+  `--install ... || --upgrade ... || true` with both outputs discarded, so the
+  Nothing global theme failed to install, was printed as done, and only showed up
+  two steps later as `!! global theme not applied` — with the entire rice unthemed
+  and the theme settings half-applied. Failures now print `kpackagetool6`'s own
+  message. (It also takes tens of seconds on a theme this size; the install was
+  working, merely slow, whenever given the chance.)
+- **GRUB drop-in replaced the whole command line.** `/etc/default/grub.d/99-nothing-splash.cfg`
+  was written with a hardcoded `GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3"`, which
+  *replaces* rather than appends — this machine's `lsm=landlock,lockdown,yama,integrity,apparmor,bpf`
+  vanished from the boot entry. Now the value is derived from `/etc/default/grub`:
+  every token kept, `quiet` dropped, `loglevel=3` added only if absent. Tokens from
+  a foreign drop-in are merged in, one this script wrote is treated as stale, the
+  generated `grub.cfg` is read back and each preserved token is asserted present.
+  A token that silently disappears again is reported.
+- **`lsinitcpio` has no `--keep`.** An unknown option is reported on *stdout* and
+  exits 0, so the listing looked empty and every initramfs check failed with
+  `frames=0` — the post-install verification was broken from the day it was
+  written. It takes `--nocolor`; `lsinitramfs` is now the fallback, not the
+  primary.
+- **`~/.local/bin`.** `30-components.sh` installed the two user services there
+  without creating it. A box that has never put a binary under `~`, or has just
+  been reinstalled, has no `~/.local/bin`, and `install(1)` does not create parent
+  directories — the step died at the gestures with ENOENT. `mkdir -p` added; on the
+  reference box only one of the two installers had it.
+- **mkinitcpio presets that cannot fail the install.** Installing `plymouth`
+  triggers pacman's "Updating linux initcpios" hook, and on a machine whose `/boot`
+  (a separate vfat partition here) is not mounted every preset dies with
+  `Invalid option -k -- '/boot/vmlinuz-linux' must be readable` while pacman still
+  reports success. The same shape appears for kernels that are listed in
+  `/etc/mkinitcpio.d` but not installed. So `60-boot-animation.sh` no longer treats
+  `plymouth-set-default-theme -R`'s exit status as fatal (it has already written
+  `plymouthd.conf` by then) and verifies **every** `/boot/initramfs-*.img` instead
+  of only the newest, naming the images that lack the theme.
+
+Known interaction, unchanged by the port: while `nothing-gestures` reads the
+touchpad, KWin's own libinput context cannot open it, so KWin's native
+three-finger left/right gestures are unavailable until the watcher stops. There is
+no libinput arbitration between two clients outside logind.

@@ -5,6 +5,7 @@
 **A Nothing OS desktop for KDE Plasma 6 — dot matrix, greyscale, one red interrupt.**
 
 Built and daily-driven on Kubuntu · Plasma 6.6 · Wayland
+Runs on **Arch** too (pacman · mkinitcpio · GRUB)
 
 <img src="docs/images/desktop.png" width="100%" alt="The full Nothing desktop: floating dynamic island, widget grid, dot-matrix clock, floating dock with the dot-grid start button">
 
@@ -17,8 +18,8 @@ boot splash, the login screen, the login *fonts*, the panels, the widget grid an
 the window compositing all follow the same rules, so there is no moment during
 startup where the illusion breaks.
 
-Everything here is scripted and reversible. `./install.sh` on a fresh Kubuntu box
-gets you the screenshot above.
+Everything here is scripted and reversible. `./install.sh` on a fresh Kubuntu or
+Arch box gets you the screenshot above.
 
 ---
 
@@ -173,13 +174,20 @@ so the licences stay with them.
 
 ## Quick start
 
-Kubuntu 24.04+ (or Ubuntu with the `kubuntu-desktop` task), Plasma **6**, Wayland or X11.
+Kubuntu 24.04+ (or Ubuntu with the `kubuntu-desktop` task), or Arch, Plasma **6**,
+Wayland or X11. The distro is detected from `/etc/os-release`; override it with
+`DISTRO=arch` or `DISTRO=debian` if that ever guesses wrong.
 
 ```bash
 git clone https://github.com/buddi0812/nothing-kde-rice
 cd nothing-kde-rice
 ./install.sh
 ```
+
+On Arch, `10-packages` installs `plymouth`, `plymouth-kcm`, `breeze-plymouth`,
+`libinput-tools` (which `nothing-gestures` shells out to — the `libinput` package
+is the library only), `python-pillow`, `python-numpy` and `imagemagick` with pacman. Note that pacman stops at a partial
+upgrade, so it needs `sudo pacman -Syu` to have been run recently.
 
 That runs the four user-level steps. Then the two that need root:
 
@@ -205,7 +213,7 @@ Every step is idempotent and standalone:
 
 | Step | Does | Root? |
 |---|---|---|
-| `10-packages` | apt packages | sudo for apt |
+| `10-packages` | apt (Ubuntu) or pacman (Arch) packages | sudo |
 | `20-upstream` | widgets, fonts, store themes, wallpapers | no |
 | `30-components` | plasmoids, KWin effect + script, gestures, net-reload, Konsole, appearance | no |
 | `40-layout` | panels + desktop widget grid | no |
@@ -233,14 +241,32 @@ default, not a bug. Right-click → Configure.
 
 **The window decoration is optional.** The titlebars in the screenshots are
 [Klassy](https://github.com/paulmcauley/klassy), which is not in the Ubuntu archive
-and has to be built. Skip it and KWin falls back to Breeze, which still looks fine.
+and has to be built. On Arch it is in the AUR (`paru -S klassy`). Skip it and KWin
+falls back to Breeze, which still looks fine.
+
+**Two upstream widget bugs are patched on the way in.** `patches/` carries diffs
+against jaxparrow07's `main.qml` for the battery and weather widgets; step 3 applies
+them every run (`patches/apply-upstream-patches.sh --check` to inspect,
+`--revert` to undo). On a desktop with no battery the battery widget otherwise
+sits on "Detecting Battery..." forever, and the weather widget sits on "Loading..."
+when its API is unreachable.
+
+**Arch's boot splash needs one kernel-command-line change.** Arch's plymouth has no
+console hand-over, so with `quiet` the screen stays blank until userspace — much
+longer than on Kubuntu. `60-boot-animation.sh` therefore drops `quiet` through a
+drop-in at `/etc/default/grub.d/99-nothing-splash.cfg` (it does not edit
+`/etc/default/grub`) and regenerates `grub.cfg`. Set `GRUB_PARAMS=quiet` to skip
+that. If you use systemd-boot or rEFInd instead of GRUB, the script says so and
+leaves the command line alone — drop `quiet` yourself in `/etc/kernel/cmdline` or
+the boot entry.
 
 **Do not re-apply the Nothing Global Theme with "use desktop layout" ticked.**
 It wipes the panels *and* the desktop widgets. If it happens, `./install.sh 40`
 rebuilds everything.
 
 **The desktop containment must be Folder View** for the widget grid to snap to
-208 px cells. That is the Kubuntu default.
+208 px cells. That is the default on both Kubuntu and Arch (Plasma 6 ships Folder
+View as the desktop containment).
 
 **Lyrics come from [LRCLIB](https://lrclib.net)** and are fetched only while the
 now-playing sheet is open, then cached for the session. No key, no account. Not
@@ -253,8 +279,8 @@ every track is in the database.
 ```
 ├── install.sh                  orchestrator
 ├── install/
-│   ├── lib.sh                  shared helpers, KDE-store OCS downloader
-│   ├── 10-packages.sh          apt
+│   ├── lib.sh                  shared helpers, distro detection, OCS downloader
+│   ├── 10-packages.sh          apt / pacman
 │   ├── 20-upstream.sh          widgets, fonts, store themes, wallpapers
 │   ├── 30-components.sh        plasmoids, KWin effect + script, services, appearance
 │   ├── 40-layout.sh            panels + desktop widget grid
@@ -273,6 +299,8 @@ every track is in the database.
 ├── plymouth/nothing/           60 frames + make-frames.py
 ├── konsole/                    Nothing profile + colour scheme
 ├── panel-colorizer/            the two panel-background presets
+├── patches/                    fixes for two jaxparrow07 widget bugs, re-applied
+│                               by step 3 because step 2 reinstalls that pack
 ├── uninstall/revert-desktop.sh
 └── docs/
     ├── ENGINEERING-LOG.md      how each piece was built, and what broke
