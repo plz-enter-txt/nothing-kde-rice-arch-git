@@ -1,0 +1,38 @@
+--- a/contents/ui/main.qml
++++ b/contents/ui/main.qml
+@@ -330,6 +330,17 @@
+         }
+ 
+         xhr.open("GET", url)
++        xhr.timeout = 15000
++        xhr.ontimeout = function() {
++            errorMessage = i18n("Weather service unreachable")
++            isLoading = false
++            console.warn("Geocoding request timed out:", url)
++        }
++        xhr.onerror = function() {
++            errorMessage = i18n("Weather service unreachable")
++            isLoading = false
++            console.warn("Geocoding request failed:", url)
++        }
+         xhr.send()
+     }
+ 
+@@ -397,6 +408,17 @@
+         }
+ 
+         xhr.open("GET", url)
++        xhr.timeout = 15000
++        xhr.ontimeout = function() {
++            errorMessage = i18n("Weather service unreachable")
++            isLoading = false
++            console.warn("Forecast request timed out:", url)
++        }
++        xhr.onerror = function() {
++            errorMessage = i18n("Weather service unreachable")
++            isLoading = false
++            console.warn("Forecast request failed:", url)
++        }
+         xhr.send()
+     }
+ 

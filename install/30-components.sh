@@ -30,10 +30,28 @@ else
     warn "date widget not found -- the quote widget will fall back to a system serif"
 fi
 
+say "Upstream widget fixes"
+# Two bugs in jaxparrow07's pack, kept as diffs in patches/ because step 2
+# reinstalls that pack from GitHub on every run and would overwrite any edit
+# made here. See patches/apply-upstream-patches.sh for what they fix.
+if [ -x "$REPO/patches/apply-upstream-patches.sh" ]; then
+    bash "$REPO/patches/apply-upstream-patches.sh" 2>&1 \
+        | grep -E '^\s+(patched|already|restored)|^\s+!!' | sed 's/^ */    /' || true
+    step "battery: no more endless \"Detecting Battery...\"; card hides when there is nothing to show"
+    step "weather: requests time out instead of spinning forever"
+else
+    warn "patches/apply-upstream-patches.sh missing -- the battery and weather fixes are not applied"
+fi
+
 say "KWin effect -- monochrome inactive windows"
-mkdir -p "$LOCAL/kwin/effects"
+# Effect and script packages must sit in <data dir>/kwin/effects and
+# .../kwin/scripts. KWin on Arch does not search the *bare* ~/.local/share/kwin,
+# so write to the per-application data dir Plasma sets up.
+mkdir -p "$LOCAL/kwin/effects" "$LOCAL/kwin/scripts"
 rm -rf "$LOCAL/kwin/effects/nothing-monochrome-inactive"
 cp -r "$REPO/kwin/effects/nothing-monochrome-inactive" "$LOCAL/kwin/effects/"
+[ -f "$LOCAL/kwin/effects/nothing-monochrome-inactive/metadata.json" ] \
+    || warn "effect metadata.json missing after copy -- KWin will ignore it"
 kwriteconfig6 --file kwinrc --group Plugins --key nothing-monochrome-inactiveEnabled true
 kwriteconfig6 --file kwinrc --group Effect-nothing-monochrome-inactive --key Saturation 0
 kwriteconfig6 --file kwinrc --group Effect-nothing-monochrome-inactive --key Duration 250
@@ -57,12 +75,21 @@ say "Three-finger touchpad gestures"
 # is absent from the JS API that scripts get, and nothing on KWin's D-Bus exposes
 # it either. So a small watcher reads libinput and invokes the two shortcuts
 # above. It needs no privilege beyond membership of the `input` group.
+# ~/.local/bin does not exist on a box that has never installed a user-local
+# binary, and `install` does not create parent directories.
+mkdir -p "$HOME/.local/bin" "$HOME/.config/systemd/user"
 install -m 755 "$REPO/services/nothing-gestures" "$HOME/.local/bin/nothing-gestures"
 install -m 644 "$REPO/services/nothing-gestures.service" "$HOME/.config/systemd/user/"
 [ -f "$HOME/.config/nothing-gestures.conf" ] || \
     install -m 644 "$REPO/services/nothing-gestures.conf" "$HOME/.config/nothing-gestures.conf"
 systemctl --user daemon-reload >/dev/null 2>&1 || true
-if ! id -nG | tr ' ' '\n' | grep -qx input; then
+if ! have libinput; then
+    warn "the libinput tools are missing, so the gestures cannot read the touchpad"
+    if [ "$PKG" = pacman ]; then
+        warn "  the 'libinput' package is the library only -- sudo pacman -S libinput-tools"
+    fi
+    warn "  everything else works without them; only the gestures are lost"
+elif ! id -nG | tr ' ' '\n' | grep -qx input; then
     warn "you are not in the 'input' group, so the gestures cannot read the touchpad"
     warn "  sudo gpasswd -a $USER input   # then log out and back in"
     warn "  note: this lets any process you run read every input device, keyboard included"
@@ -105,7 +132,12 @@ say "Appearance"
 plasma-apply-lookandfeel -a Nothing >/dev/null 2>&1 || warn "global theme not applied"
 plasma-apply-colorscheme Nothing    >/dev/null 2>&1 || true
 plasma-apply-cursortheme WhiteSur-cursors >/dev/null 2>&1 || true
-CHANGEICONS=$(ls /usr/lib/*/libexec/plasma-changeicons 2>/dev/null | head -1)
+# Debian: /usr/lib/<triplet>/libexec/plasma-changeicons. Arch drops the
+# libexec level and installs it straight into /usr/lib.
+# An unmatched glob is passed through literally and makes `ls` exit 2 -- under
+# set -e that ended the whole step (only one of the two paths exists on any
+# given distro). `|| true` keeps the pipeline's status out of it.
+CHANGEICONS=$(ls /usr/lib/*/libexec/plasma-changeicons /usr/lib/plasma-changeicons 2>/dev/null | head -1 || true)
 [ -n "$CHANGEICONS" ] && "$CHANGEICONS" YAMIS >/dev/null 2>&1 || true
 kwriteconfig6 --file plasmarc  --group Theme   --key name Nothing
 kwriteconfig6 --file kdeglobals --group Icons  --key Theme YAMIS
@@ -149,7 +181,8 @@ say "Monochrome dock icons for snap apps"
 mkdir -p "$LOCAL/applications"
 for app in firefox_firefox:firefox spotify_spotify:spotify; do
     f="${app%%:*}"; icon="${app##*:}"
-    sys=$(ls /var/lib/snapd/desktop/applications/"$f".desktop 2>/dev/null | head -1)
+    # same unmatched-glob trap as above: no snapd means ls exits 2
+    sys=$(ls /var/lib/snapd/desktop/applications/"$f".desktop 2>/dev/null | head -1 || true)
     if [ -n "$sys" ]; then
         sed "s/^Icon=.*/Icon=$icon/" "$sys" > "$LOCAL/applications/$f.desktop"
         step "$f.desktop -> Icon=$icon"

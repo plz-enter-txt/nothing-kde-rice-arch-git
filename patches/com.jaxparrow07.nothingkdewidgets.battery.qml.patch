@@ -1,0 +1,145 @@
+--- a/contents/ui/main.qml
++++ b/contents/ui/main.qml
+@@ -196,51 +196,71 @@
+         onTriggered: updateBluetoothDevices()
+     }
+ 
++    // Battery presence check. The engine is asked each tick and the counting
++    // happens here, so the "PC mode" verdict does not depend on a signal that
++    // may never arrive. Stops as soon as the question is answered.
++    Timer {
++        interval: 5000
++        running: root.batteryLoading
++        repeat: true
++        onTriggered: {
++            var d = pmSource.data["Battery"]
++            if (d !== undefined) {
++                root.handlePowerData(d)
++            } else if (root.batteryCheckAttempts < root.maxBatteryCheckAttempts) {
++                root.batteryCheckAttempts++
++            } else {
++                root.batteryLoading = false
++                root.isPCMode = true
++                root.hasBattery = false
++            }
++        }
++    }
++
+     // Font loader for ndot-55
+     FontLoader {
+         id: ndotFont
+         source: Qt.resolvedUrl("../fonts/ndot-55.otf")
+     }
+ 
++    // The powermanagement engine is push-based: onNewData fires only when a
++    // Solid signal does (presentStateChanged, chargePercentChanged, ...). On a
++    // machine with no battery none of those ever fire, so this handler never
++    // ran and the loading spinner -- whose only exit is "6 unanswered ticks" --
++    // spun forever. The Timer below is now what decides "no battery".
++    function handlePowerData(data) {
++        var hasBat = data["Has Battery"] || false
++
++        if (hasBat) {
++            root.batteryCheckAttempts = 0
++            root.hasBattery = true
++            root.batteryLoading = false
++            root.isPCMode = false
++        } else {
++            if (root.batteryCheckAttempts < root.maxBatteryCheckAttempts) {
++                root.batteryCheckAttempts++
++            } else {
++                root.batteryLoading = false
++                root.isPCMode = true
++            }
++            root.hasBattery = false
++        }
++
++        root.batteryPercent = data["Percent"] || 0
++        root.batteryState = data["State"] || ""
++        root.energyRate = Math.abs(data["Energy Rate"] || 0)
++        root.isBatterySaver = data["Battery Save Mode"] || false
++    }
++
+     // Power Management Data Source (Plasma 6)
+     P5Support.DataSource {
+         id: pmSource
+         engine: "powermanagement"
+         connectedSources: ["Battery", "AC Adapter"]
+-        interval: 5000  // Update every 5 seconds
+ 
+         onNewData: function(source, data) {
+             if (source === "Battery") {
+-                var hasBat = data["Has Battery"] || false
+-
+-                // If battery is found, reset the check attempts counter
+-                if (hasBat) {
+-                    root.batteryCheckAttempts = 0
+-                    root.hasBattery = true
+-                    root.batteryLoading = false
+-                    root.isPCMode = false
+-                } else {
+-                    // Increment check attempts
+-                    if (root.batteryCheckAttempts < root.maxBatteryCheckAttempts) {
+-                        root.batteryCheckAttempts++
+-                    } else {
+-                        // After max attempts, we're definitely in PC mode
+-                        root.batteryLoading = false
+-                        root.isPCMode = true
+-                    }
+-                    root.hasBattery = false
+-                }
+-
+-                root.batteryPercent = data["Percent"] || 0
+-                root.batteryState = data["State"] || ""
+-
+-                // Get energy rate (power consumption/generation in watts)
+-                // Positive = discharging, Negative = charging
+-                root.energyRate = Math.abs(data["Energy Rate"] || 0)
+-
+-                // Determine if battery saver mode is active
+-                // Battery saver is typically when "Battery Save Mode" is enabled
+-                root.isBatterySaver = data["Battery Save Mode"] || false
++                root.handlePowerData(data)
+             } else if (source === "AC Adapter") {
+                 root.isCharging = data["Plugged in"] || false
+             }
+@@ -277,6 +297,12 @@
+     readonly property int compactCircleCount: (showMainBattery ? 1 : 0) + root.bluetoothDevices.length
+     // Hide compact view entirely if nothing to show
+     readonly property bool compactVisible: compactCircleCount > 0
++    // Same question for the desktop card: one main battery + any BT devices.
++    // While detection is still running there is nothing to draw, and once it
++    // decides "no battery" on a desktop that stays true forever -- so the whole
++    // 200x200 card (background included) is hidden rather than left as an empty
++    // black rectangle.
++    readonly property bool desktopHasContent: (showMainBattery ? 1 : 0) + bluetoothDevices.length > 0
+ 
+     compactRepresentation: Item {
+         id: compactItem
+@@ -459,16 +485,22 @@
+     }
+ 
+     fullRepresentation: Item {
+-        Layout.preferredWidth: 200
+-        Layout.preferredHeight: 200
+-        Layout.minimumWidth: 200
+-        Layout.minimumHeight: 200
++        // Nothing to show (desktop with no battery, no BT devices): collapse to
++        // nothing instead of leaving an empty dark card on the desktop.
++        visible: root.desktopHasContent
++        Layout.preferredWidth: root.desktopHasContent ? 200 : 0
++        Layout.preferredHeight: root.desktopHasContent ? 200 : 0
++        Layout.minimumWidth: root.desktopHasContent ? 200 : 0
++        Layout.minimumHeight: root.desktopHasContent ? 200 : 0
++        Layout.maximumWidth: root.desktopHasContent ? 200 : 0
++        Layout.maximumHeight: root.desktopHasContent ? 200 : 0
+ 
+         // Main background
+         Rectangle {
+             id: mainBackground
+             anchors.fill: parent
+             anchors.margins: 10
++            visible: root.desktopHasContent
+             color: nColors.background
+             radius: 20
+             opacity: 0.95
