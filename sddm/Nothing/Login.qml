@@ -84,11 +84,16 @@ SessionManagementScreen {
         id: faceRow
         visible: showUsernamePrompt
         Layout.alignment: Qt.AlignHCenter
-        Layout.topMargin: Kirigami.Units.gridUnit
+        // No topMargin: Main.qml sizes mainStack to root.height + 3 gridUnits and
+        // centres it, so anything that makes the login column taller pushes the
+        // power buttons off the bottom of the screen. The avatar is kept small
+        // for the same reason -- it has to fit inside the existing budget.
+        Layout.preferredWidth: faceRow.faceSize
+        Layout.preferredHeight: faceRow.faceSize
         implicitWidth: faceRow.faceSize
         implicitHeight: faceRow.faceSize
 
-        readonly property int faceSize: Kirigami.Units.gridUnit * 3
+        readonly property int faceSize: Kirigami.Units.gridUnit * 2
 
         // The circular crop is baked into the PNG by install/50-login-screen.sh,
         // so this is a plain Image: no OpacityMask, no Qt5Compat.GraphicalEffects,
