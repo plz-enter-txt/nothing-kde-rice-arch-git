@@ -3,7 +3,6 @@ import org.kde.breeze.components
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
-import Qt5Compat.GraphicalEffects
 
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.extras as PlasmaExtras
@@ -86,59 +85,37 @@ SessionManagementScreen {
         visible: showUsernamePrompt
         Layout.alignment: Qt.AlignHCenter
         Layout.topMargin: Kirigami.Units.gridUnit
-        implicitWidth: faceSize
-        implicitHeight: faceSize
+        implicitWidth: faceRow.faceSize
+        implicitHeight: faceRow.faceSize
 
         readonly property int faceSize: Kirigami.Units.gridUnit * 3
 
+        // The circular crop is baked into the PNG by install/50-login-screen.sh,
+        // so this is a plain Image: no OpacityMask, no Qt5Compat.GraphicalEffects,
+        // nothing that can fail to parse.
         Image {
             id: faceImage
             anchors.fill: parent
             anchors.margins: 2
             source: "faces/.face.icon"
-            fillMode: Image.PreserveAspectCrop
+            fillMode: Image.PreserveAspectFit
             asynchronous: true
-            sourceSize.width: faceSize * Screen.devicePixelRatio
-            sourceSize.height: faceSize * Screen.devicePixelRatio
-            // Hidden once masked, so it is not also drawn square on top.
-            visible: false
+            smooth: true
+            // Qualify with the id: an unqualified name here resolves against
+            // the component root, not the parent Item, and fails with
+            // "ReferenceError: faceSize is not defined".
+            sourceSize.width: faceRow.faceSize * Screen.devicePixelRatio
+            sourceSize.height: faceRow.faceSize * Screen.devicePixelRatio
         }
 
-        // Qt has no built-in circular clip for an Image; an OpacityMask with a
-        // rounded Rectangle as the mask is the standard way.
-        OpacityMask {
-            anchors.fill: faceImage
-            source: faceImage
-            maskSource: mask
-        }
-
-        Rectangle {
-            id: mask
-            anchors.fill: faceImage
-            radius: width / 2
-            color: "#ffffff"
-            layer.enabled: false
-            visible: false
-        }
-
+        // Only when there is no image at all: a thin ring, so the layout does not
+        // collapse and nothing looks broken.
         Rectangle {
             anchors.fill: parent
             radius: width / 2
             color: "transparent"
             border.width: 1
-            border.color: "#333333"
-        }
-
-        Rectangle {
-            // When there is no image, a small monochrome mark stands in -- the
-            // dotted "person" of the Nothing icon set, drawn with three dots.
-            anchors.centerIn: parent
-            width: parent.faceSize * 0.42
-            height: parent.faceSize * 0.42
-            radius: width / 2
-            color: "transparent"
-            border.width: 1
-            border.color: "#666666"
+            border.color: "#444444"
             visible: faceImage.status !== Image.Ready
         }
     }

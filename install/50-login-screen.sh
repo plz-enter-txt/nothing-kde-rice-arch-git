@@ -5,7 +5,18 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 [ "$(id -u)" -eq 0 ] || die "run this one with sudo"
-USERHOME=$(getent passwd "${SUDO_USER:-$USER}" | cut -d: -f6)
+# Who owns the fonts and avatar to install. Under sudo that is SUDO_USER; under
+# pkexec neither SUDO_USER nor $USER names a human ($USER is root), so fall back
+# to the caller pkexec records in PKEXEC_UID, then to the first regular user.
+if [ -z "${TARGET_USER:-}" ]; then
+    for u in "${SUDO_USER:-}" "$(getent passwd "${PKEXEC_UID:-0}" 2>/dev/null | cut -d: -f1)" \
+             "$(awk -F: '$3>=1000 && $3<65534 {print $1; exit}' /etc/passwd)"; do
+        [ -n "$u" ] && [ "$u" != "root" ] && { TARGET_USER=$u; break; }
+    done
+fi
+[ -n "${TARGET_USER:-}" ] || die "cannot tell which user's fonts/avatar to install; run with TARGET_USER=\$USER"
+USERHOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
+step "target user: $TARGET_USER ($USERHOME)"
 THEMES=/usr/share/sddm/themes
 DEST="$THEMES/Nothing"
 
@@ -50,36 +61,100 @@ else
     sed -i 's/^type=.*/type=color/' "$DEST/theme.conf"
 fi
 
-# SDDM wants an avatar directory to exist even when the theme shows no avatars.
+# The theme draws one circular avatar above the username prompt. The crop is
+# baked into the PNG rather than done with OpacityMask, because importing
+# Qt5Compat.GraphicalEffects into a second QML file is one more way for the
+# greeter to fail silently and fall back to the stock theme.
 install -d "$DEST/faces"
+FACESRC=""
+for c in "/var/lib/AccountsService/icons/$TARGET_USER" \
+         "$USERHOME/.face.icon" \
+         "/var/lib/AccountsService/icons/$(id -nu 1000 2>/dev/null)"; do
+    [ -f "$c" ] && { FACESRC="$c"; break; }
+done
+if [ -n "$FACESRC" ]; then
+    if have magick || have convert; then
+        IM=$(have magick && echo magick || echo convert)
+        # 256x256 square crop, then a white circle as the alpha mask.
+        "$IM" "$FACESRC" -resize 256x256^ -gravity center -extent 256x256 \
+              \( +clone -alpha extract \
+                 -draw 'fill black polygon 0,0 0,256 256,256 256,0 fill white circle 128,128 128,0' \
+                 \( +clone -flip \) -compose Multiply -composite \
+                 \( +clone -flop \) -compose Multiply -composite \) \
+              -alpha off -compose CopyOpacity -composite "$DEST/faces/.face.icon" \
+            && step "avatar: $(basename "$FACESRC") -> circular 256x256"
+    else
+        cp "$FACESRC" "$DEST/faces/.face.icon"
+        warn "imagemagick missing -- avatar copied uncropped (the theme will square it)"
+    fi
+else
+    warn "no avatar found for $TARGET_USER -- the login prompt shows a plain ring."
+    warn "  set one in System Settings -> Users, then re-run this step"
+fi
+
 chown -R root:root "$DEST"
 chmod -R a+rX "$DEST"
 
-say "Validating the QML before it can lock you out"
-# An unknown property anywhere in the theme makes SDDM silently swap in the
-# stock greeter -- the theme just "doesn't apply" with no visible error.
-# Kubuntu's qt6 tools live under /usr/lib/qt6/bin; Arch puts them in /usr/bin.
-QMLLINT=$(ls /usr/lib/qt6/bin/qmllint 2>/dev/null || command -v qmllint 2>/dev/null || true)
-if [ -z "$QMLLINT" ] && [ "$PKG" = pacman ]; then
-    sudo pacman -S --needed --noconfirm qt6-declarative 2>/dev/null || true
-    QMLLINT=$(ls /usr/lib/qt6/bin/qmllint 2>/dev/null || command -v qmllint 2>/dev/null || true)
-fi
-# The qmllint below runs as the invoking user (sudo -E keeps the umask and
-# PATH, not the privilege). Re-assert the read bits so a restrictive umask on
-# this machine cannot make the linter's EACCES read as a theme problem.
+say "Validating the theme before it can lock you out"
+# Measured on this machine, greeter --test-mode DOES catch the errors that
+# actually break a theme: it printed "Login.qml:102: ReferenceError: faceSize is
+# not defined" for a real broken build. What it cannot see is a theme file that
+# is never instantiated, which is why every *.qml is compiled below, not just
+# Main.qml. QT_FORCE_STDERR_LOGGING is what puts those lines on the terminal;
+# without it there is no output at all and "no output" looks like success.
 chmod -R a+rX "$DEST"
-if [ -n "$QMLLINT" ]; then
-    bad=0
-    for f in "$DEST"/*.qml; do
-        out=$("$QMLLINT" "$f" 2>&1)
-        rc=$?
-        if [ "$rc" -ne 0 ] || grep -q '^Error' <<<"$out"; then
-            warn "QML error in $(basename "$f")"; bad=1
-        fi
-    done
-    [ "$bad" -eq 0 ] && step "no QML errors" || die "fix the theme before activating it"
-else
-    warn "qmllint not found (Arch: sudo pacman -S qt6-declarative) -- skipping validation"
+
+GREETER=$(command -v sddm-greeter-qt6 || command -v sddm-greeter || true)
+glog=$(mktemp)
+[ -n "$GREETER" ] || warn "sddm-greeter not found -- cannot verify the theme by loading it"
+
+if [ -n "$GREETER" ]; then
+    QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
+        timeout 15 "$GREETER" --test-mode --theme "$DEST" >"$glog" 2>&1 || true
+    # NB: a grep with no match exits 1, and an assignment whose command
+    # substitution failed aborts the script under set -e -- hence `|| true`.
+    bad=$(grep -iE 'ReferenceError|TypeError|is not defined|is not a type|Unable to assign|Expected token|SyntaxError|Failed to load|QQmlApplicationEngine failed' "$glog" \
+          | grep -v 'diskcache' | sort -u | head -8 || true)
+    if [ -n "$bad" ]; then
+        printf '%s\n' "$bad" | sed 's/^/      /'
+        rm -f "$glog"
+        die "the greeter cannot load this theme -- not activating it"
+    fi
+    step "greeter loaded the theme with no QML errors"
+
+    # sddm-greeter only builds what is on screen; Login.qml is created lazily
+    # when the user interacts. Compile it explicitly so a broken login form
+    # cannot slip through.
+    probe=$(mktemp "$DEST/.probe-XXXXXX.qml")
+    cat >"$probe" <<'EOF'
+import QtQuick
+Item {
+    Component.onCompleted: {
+        var files = []
+        // every theme file except this probe
+        for (var i = 0; i < 6; i++) files.push(["Main","Login","Background",
+                                               "KeyboardButton","SessionButton","NothingClock"][i] + ".qml")
+        for (var j = 0; j < files.length; j++) {
+            var c = Qt.createComponent(files[j])
+            if (c.status === Component.Error)
+                console.log("PROBE-FAIL " + files[j] + " " + c.errorString())
+        }
+        Qt.exit(0)
+    }
+}
+EOF
+    plog=$(mktemp)
+    QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
+        timeout 20 qmlscene "$probe" >"$plog" 2>&1 || true
+    rm -f "$probe"
+    pbad=$(grep 'PROBE-FAIL' "$plog" | head -5 || true)
+    if [ -n "$pbad" ]; then
+        printf '%s\n' "$pbad" | sed 's/^/      /'
+        rm -f "$glog" "$plog"
+        die "a theme file fails to compile -- not activating it"
+    fi
+    step "all theme QML files compile"
+    rm -f "$glog" "$plog"
 fi
 
 say "Checking the sddm user can resolve the fonts"
