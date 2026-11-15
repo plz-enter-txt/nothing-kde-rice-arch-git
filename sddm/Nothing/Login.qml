@@ -92,7 +92,11 @@ SessionManagementScreen {
         Layout.maximumHeight: 0
         implicitHeight: 0
 
-        readonly property int faceSize: Kirigami.Units.gridUnit * 2
+        // Space budget, measured on the 800px-tall headless greeter: the row
+        // sits at y≈510 and the clock ends at y≈228, so the avatar may grow to
+        // roughly 8 gridUnits before touching the clock. 4 gridUnits is a
+        // comfortable size that stays clear of it on shorter screens too.
+        readonly property int faceSize: Kirigami.Units.gridUnit * 4
 
         // The circular crop is baked into the PNG by install/50-login-screen.sh,
         // so this is a plain Image -- no OpacityMask, no effect module.
