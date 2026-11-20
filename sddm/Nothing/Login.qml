@@ -86,17 +86,29 @@ SessionManagementScreen {
     // therefore anchored above the username field and overflows upward.
     Item {
         id: faceRow
-        visible: showUsernamePrompt
         Layout.fillWidth: true
         Layout.preferredHeight: 0
         Layout.maximumHeight: 0
         implicitHeight: 0
+
+        // The notification label ("Login Failed", "Caps Lock is on") is laid out
+        // ABOVE this row inside SessionManagementScreen's prompts column, and it
+        // pushes the whole column down when it appears. The avatar grows upward
+        // from here, so the two would occupy the same strip of screen.
+        readonly property bool messageShown: notificationMessage
+                                             && notificationMessage.length > 0
 
         // Space budget, measured on the 800px-tall headless greeter: the row
         // sits at y≈510 and the clock ends at y≈228, so the avatar may grow to
         // roughly 8 gridUnits before touching the clock. 4 gridUnits is a
         // comfortable size that stays clear of it on shorter screens too.
         readonly property int faceSize: Kirigami.Units.gridUnit * 4
+
+        // Hidden outright while a message is up: the face is decorative, the
+        // message is not. Done with `visible` rather than by shrinking to 0 --
+        // a zero-size texture request makes the X server answer
+        // "BadValue (integer parameter out of range)".
+        visible: showUsernamePrompt && !messageShown
 
         // The circular crop is baked into the PNG by install/50-login-screen.sh,
         // so this is a plain Image -- no OpacityMask, no effect module.
@@ -107,6 +119,7 @@ SessionManagementScreen {
             anchors.bottom: parent.top
             anchors.bottomMargin: Kirigami.Units.smallSpacing
             anchors.horizontalCenter: parent.horizontalCenter
+            visible: faceRow.faceSize > 0
             width: faceRow.faceSize
             height: faceRow.faceSize
             source: "faces/.face.icon"
